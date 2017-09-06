@@ -1,0 +1,163 @@
+
+```{r}
+library(dplyr)
+library(forecast)
+library(TTR)
+library(Metrics)
+library(tidyr)
+library(dplyr)
+library(zoo)
+library(hydroGOF)
+library(ggplot2)
+library(readr)
+
+```
+
+
+```{r}
+train <- read_csv('train.csv')
+test <- read_csv('test.csv')
+
+```
+
+```{r}
+summary(train)
+summary(test)
+
+```
+
+
+```{r}
+
+quantile(train$Price, probs = seq(0, 1, 0.05))
+quantile(train$Number_Of_Sales, probs = seq(0, 1, 0.05))
+```
+
+
+```{r}
+train1 <- separate(train,Datetime,c("year","month","day"),sep='-')
+
+```
+
+
+
+```{r}
+train1$year <- as.factor(train1$year)
+train1$month <- as.factor(train1$month)
+train1$day <- as.factor(train1$day)
+train1$Category_3 <- as.factor(train1$Category_3)
+train1$Category_2 <- as.factor(train1$Category_2)
+
+summary(train1)
+
+```
+
+```{r}
+test1 <- separate(test,Datetime,c("year","month","day"),sep='-')
+
+```
+
+```{r}
+test1$year <- as.factor(test1$year)
+test1$month <- as.factor(test1$month)
+test1$day <- as.factor(test1$day)
+test1$Category_3 <- as.factor(test1$Category_3)
+test1$Category_2 <- as.factor(test1$Category_2)
+
+summary(test1)
+
+```
+
+```{r}
+
+train1_test1 <- rbind(train1[,c(2:8)],test1[,c(1:4,7,6,5)])
+
+names(train1_test1)
+nrow(train1_test1)
+
+```
+
+
+```{r}
+library(missForest)
+library(doParallel)
+registerDoParallel(cores = 4)
+
+train1_test1.imp <- missForest(train1_test1,parallelize = "variables")
+
+train1_test1.imp$OOBerror
+
+```
+
+```{r}
+
+train2 <- train1_test1.imp$ximp[1:nrow(train1),]
+test2 <-  train1_test1.imp$ximp[-c(1:nrow(train1)),]
+
+
+```
+
+```{r}
+
+train2_sales <- train2 %>% mutate(Number_Of_Sales=train1$Number_Of_Sales,Price=train1$Price)
+train2_price <- train2 %>% mutate(Price=train1$Price)
+test2 <- test2 %>% mutate(ID=test1$ID)
+
+```
+
+```{r}
+names(train2_price)
+names(train2_sales)
+names(test2)
+
+```
+
+
+```{r}
+
+write_csv(train2_price,'train2_price.csv')
+write_csv(train2_sales,'train2_sales.csv')
+write_csv(test2,'test2.csv')
+
+```
+
+```{r}
+train_items <- unique(train2_price$Item_ID)
+test_items <- unique(test2$Item_ID)
+```
+
+
+### Simple moving average
+
+```{r}
+for (i in 1:length(train_items))
+{
+  
+  tempp <- train2_price[train2_price$Item_ID==train_items[i],]
+  temps <- train2_sales[train2_sales$Item_ID==train_items[i],]
+
+  temp <- test2[test2$Item_ID==train_items[i],]
+  
+  if (nrow(temp)>0)
+  {
+    
+    temp.ts.p <- ts(tempp[,8],frequency =365, start=c(2014,1,1))
+    temp.ts.s <- ts(temps[,8],frequency =365, start=c(2014,1,1))
+  
+    #SMA
+    SMA_p <- sma(temp.ts.p, ic="AIC",h=nrow(temp),silent="graph")
+    SMA_s <- sma(temp.ts.s, ic="AIC",h=nrow(temp),silent="graph")
+    
+
+    test_op <- data.frame(ID=temp[,8],Number_Of_Sales=SMA_s$forecast,Price=SMA_p$forecast)
+    write.table(test_op, "testop2.csv", sep = ",", append = T,col.names = F)
+  }
+  
+  if (i%%10==0)
+  {
+    print(i)
+  }
+
+}
+```
+
